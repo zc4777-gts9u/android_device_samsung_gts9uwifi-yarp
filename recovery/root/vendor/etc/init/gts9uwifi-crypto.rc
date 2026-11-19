@@ -1,0 +1,52 @@
+service vendor.qseecomd /vendor/bin/qseecomd
+    class core
+    disabled
+    user root
+    group root drmrpc
+    socket notify-topology stream 660 system drmrpc
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0
+
+service vendor.keymint-default /vendor/bin/hw/android.hardware.security.keymint-service-qti
+    class early_hal
+    disabled
+    user system
+    group system drmrpc
+    interface aidl android.hardware.security.keymint.IKeyMintDevice/default
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0
+
+service vendor.gatekeeper-1-0 /vendor/bin/hw/android.hardware.gatekeeper@1.0-service
+    class hal
+    disabled
+    user system
+    group system drmrpc
+    interface android.hardware.gatekeeper@1.0::IGatekeeper default
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0
+
+service vendor.spdaemon /vendor/bin/spdaemon
+    class core
+    disabled
+    user system
+    group system
+    setenv LD_LIBRARY_PATH /vendor/lib64:/system/lib64
+    seclabel u:r:recovery:s0
+
+service vendor.sec_nvm /vendor/bin/sec_nvm
+    class core
+    disabled
+    user system
+    group system
+    setenv LD_LIBRARY_PATH /vendor/lib64:/system/lib64
+    seclabel u:r:recovery:s0
+
+service hermesd /vendor/bin/hermesd /data/vendor/gatekeeper
+    class hal
+    disabled
+    user system
+    group system 5678
+    socket hermes_secnvm stream 660 system system
+    interface android.hardware.weaver@1.0::IWeaver default
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0

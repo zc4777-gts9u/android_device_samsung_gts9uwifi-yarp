@@ -1,0 +1,17 @@
+<manifest version="9.0" type="device">
+    <hal format="hidl">
+        <name>android.hardware.gatekeeper</name>
+        <transport>hwbinder</transport>
+        <fqname>@1.0::IGatekeeper/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>vendor.samsung.hardware.keymint</name>
+        <version>2</version>
+        <fqname>ISehKeyMintExtension/default</fqname>
+    </hal>
+    <hal format="aidl">
+        <name>vendor.samsung.hardware.keymint</name>
+        <version>2</version>
+        <fqname>ISehKeyMintFactory/default</fqname>
+    </hal>
+</manifest>

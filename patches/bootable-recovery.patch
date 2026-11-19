@@ -1,0 +1,111 @@
+diff --git a/etc/init/keystore2.rc b/etc/init/keystore2.rc
+index 71c39ef..e2448cc 100644
+--- a/etc/init/keystore2.rc
++++ b/etc/init/keystore2.rc
+@@ -6,7 +6,7 @@
+ #
+ # See system/core/init/README.md for information on the init.rc language.
+ 
+-on late-init
++on post-fs
+     start keystore2
+ 
+ service keystore2 /system/bin/keystore2 /tmp/misc/keystore
+@@ -16,6 +16,4 @@ service keystore2 /system/bin/keystore2 /tmp/misc/keystore
+     task_profiles ProcessCapacityHigh
+     # The default memlock limit of 65536 bytes is too low for keystore.
+     rlimit memlock unlimited unlimited
+-    # Reboot to bootloader if Keystore crashes more than 4 times before `sys.boot_completed`.
+-    critical window=0
+     seclabel u:r:recovery:s0
+diff --git a/partitionmanager.cpp b/partitionmanager.cpp
+index c419f3d..acf144c 100755
+--- a/partitionmanager.cpp
++++ b/partitionmanager.cpp
+@@ -34,6 +34,7 @@
+ #include <algorithm>
+ #include <cerrno>
+ #include <charconv>
++#include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -82,6 +83,7 @@
+ #endif
+ 
+ #ifdef TW_HAS_MTP
++#include "MtpDescriptors.h"
+ #include "MtpMessage.hpp"
+ #include "TwrpMtp.hpp"
+ #endif
+@@ -2646,6 +2648,13 @@ bool TWPartitionManager::EnableMtp() {
+     return true;
+   }
+ 
++  const bool use_ffs_mtp = android::base::GetBoolProperty("ro.twrp.mtp.use_ffs", false);
++  if (use_ffs_mtp && access(android::FFS_MTP_EP0, W_OK) != 0) {
++    LOGERR("MTP FunctionFS control endpoint is unavailable\n");
++    gui2_console::log_error("mtp_fail");
++    return false;
++  }
++
+   int mtppipe[2];
+ 
+   if (pipe(mtppipe) < 0) {
+@@ -2655,10 +2664,12 @@ bool TWPartitionManager::EnableMtp() {
+ 
+   if (android::base::GetProperty("sys.usb.config", "") != "mtp,adb") {
+     android::base::SetProperty("sys.usb.config", "none");
+-    const std::string vendor = android::base::GetProperty("usb.vendor", "18D1");
+-    const std::string product = android::base::GetProperty("usb.product.mtpadb", "4EE2");
+-    TWFunc::WriteToFile("/sys/class/android_usb/android0/idVendor", vendor);
+-    TWFunc::WriteToFile("/sys/class/android_usb/android0/idProduct", product);
++    if (!use_ffs_mtp) {
++      const std::string vendor = android::base::GetProperty("usb.vendor", "18D1");
++      const std::string product = android::base::GetProperty("usb.product.mtpadb", "4EE2");
++      TWFunc::WriteToFile("/sys/class/android_usb/android0/idVendor", vendor);
++      TWFunc::WriteToFile("/sys/class/android_usb/android0/idProduct", product);
++    }
+     android::base::SetProperty("sys.usb.config", "mtp,adb");
+   }
+   /* To enable MTP debug, use the twrp command line feature:
+@@ -2669,12 +2680,20 @@ bool TWPartitionManager::EnableMtp() {
+   if (mtp_pid_) {
+     close(mtppipe[0]); // Host closes read side
+     mtp_write_fd = mtppipe[1];
++    if (use_ffs_mtp &&
++        !android::base::WaitForProperty("sys.usb.state", "mtp,adb", std::chrono::seconds(3))) {
++      LOGERR("MTP and ADB USB configuration did not become ready\n");
++      DisableMtp();
++      gui2_console::log_error("mtp_fail");
++      return false;
++    }
+     DataManager::SetValue("tw_mtp_enabled", 1);
+     AddAllMtpStorage();
+     return true;
+   }
+   close(mtppipe[0]);
+   close(mtppipe[1]);
++  DisableMtp();
+   gui2_console::log_error("mtp_fail");
+   return false;
+ #else
+@@ -2700,11 +2719,13 @@ bool TWPartitionManager::DisableMtp() {
+   android::base::SetProperty("sys.usb.ffs.mtp.ready", "0");
+   if (android::base::GetProperty("sys.usb.config", "") != "adb") {
+     android::base::SetProperty("sys.usb.config", "none");
+-    const std::string vendor = android::base::GetProperty("usb.vendor", "18D1");
+-    const std::string product = android::base::GetProperty("usb.product.adb", "D001");
+-    TWFunc::WriteToFile("/sys/class/android_usb/android0/idVendor", vendor);
+-    TWFunc::WriteToFile("/sys/class/android_usb/android0/idProduct", product);
+-    usleep(2000);
++    if (!android::base::GetBoolProperty("ro.twrp.mtp.use_ffs", false)) {
++      const std::string vendor = android::base::GetProperty("usb.vendor", "18D1");
++      const std::string product = android::base::GetProperty("usb.product.adb", "D001");
++      TWFunc::WriteToFile("/sys/class/android_usb/android0/idVendor", vendor);
++      TWFunc::WriteToFile("/sys/class/android_usb/android0/idProduct", product);
++      usleep(2000);
++    }
+   }
+ #ifdef TW_HAS_MTP
+   if (mtp_pid_) {

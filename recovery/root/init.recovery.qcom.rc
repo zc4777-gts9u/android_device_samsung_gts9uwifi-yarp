@@ -1,0 +1,55 @@
+import /vendor/etc/init/gts9uwifi-crypto.rc
+
+on init
+    write /sys/class/backlight/panel0-backlight/brightness 255
+    setprop sys.usb.configfs 1
+
+on property:ro.boot.usbcontroller=*
+    setprop sys.usb.controller ${ro.boot.usbcontroller}
+
+on fs
+    wait /dev/block/platform/soc/${ro.boot.bootdevice} 5
+    symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
+    mkdir /vendor/firmware_mnt 0755 root root
+    mkdir /mnt/vendor 0755 root root
+    mkdir /mnt/vendor/efs 0755 root root
+    mkdir /mnt/vendor/persist 0755 root root
+    mkdir /efs 0755 root root
+    mount vfat /dev/block/by-name/apnhlos /vendor/firmware_mnt ro nosuid nodev noexec
+    mount ext4 /dev/block/by-name/efs /mnt/vendor/efs ro noload nosuid nodev
+    mount ext4 /dev/block/by-name/sec_efs /efs ro noload nosuid nodev
+    mount ext4 /dev/block/by-name/persist /mnt/vendor/persist ro noload nosuid nodev
+
+    chown system system /dev/dma_heap/qcom,qseecom
+    chmod 0444 /dev/dma_heap/qcom,qseecom
+    chown system system /dev/dma_heap/qcom,qseecom-ta
+    chmod 0444 /dev/dma_heap/qcom,qseecom-ta
+    chown system drmrpc /dev/qseecom
+    chmod 0660 /dev/qseecom
+    chown system drmrpc /dev/smcinvoke
+    chmod 0660 /dev/smcinvoke
+    chown system system /dev/spcom
+    chmod 0660 /dev/spcom
+    chown system system /dev/sp_kernel
+    chmod 0660 /dev/sp_kernel
+    chown system system /dev/sp_nvm
+    chmod 0660 /dev/sp_nvm
+    chown system system /dev/k250a
+    chmod 0660 /dev/k250a
+    chown system system /dev/ssp
+    chmod 0660 /dev/ssp
+    start vendor.qseecomd
+
+on post-fs
+    start vendor.spdaemon
+    start vendor.sec_nvm
+    start vendor.keymint-default
+    start vendor.gatekeeper-1-0
+
+# The daemon's working directory is present once vold has mounted userdata
+# through dm-default-key. Weaver authenticates without writing a new slot.
+on property:ro.crypto.fs_crypto_blkdev=*
+    start hermesd
+
+on boot
+    setprop sys.usb.config adb

@@ -1,0 +1,6 @@
+/prebuilt/
+/__pycache__/
+/recovery/root/lib/modules/*.ko
+/recovery/root/vendor/bin/
+/recovery/root/vendor/lib64/
+/recovery/root/vendor/etc/secnvm/

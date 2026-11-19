@@ -1,0 +1,18 @@
+diff --git a/FsCrypt.cpp b/FsCrypt.cpp
+index 54dd91c..ff36c19 100644
+--- a/FsCrypt.cpp
++++ b/FsCrypt.cpp
+@@ -575,11 +575,8 @@ install:
+     // rewrites them itself, so recovery only keeps the policy in memory.
+     de_key_raw_ref = s_device_policy.key_raw_ref;
+ 
+-    KeyBuffer per_boot_key;
+-    if (!generateStorageKey(makeGen(s_data_options), &per_boot_key)) return false;
+-    EncryptionPolicy per_boot_policy;
+-    if (!install_storage_key(DATA_MNT_POINT, s_data_options, per_boot_key, &per_boot_policy))
+-        return false;
++    // The installed system owns /data/per_boot. Recovery only needs the
++    // existing device and user keys to open files from the installed system.
+ 
+     return true;
+ }

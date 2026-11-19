@@ -1,0 +1,24 @@
+--- a/drivers/usb/notify/usb_notifier_qcom.c
++++ b/drivers/usb/notify/usb_notifier_qcom.c
+@@ -617,6 +617,11 @@
+ }
+ #endif
+ 
++static unsigned int booting_delay_override_sec;
++module_param(booting_delay_override_sec, uint, 0444);
++MODULE_PARM_DESC(booting_delay_override_sec,
++                 "Shorter USB startup delay in seconds (0 keeps the device default)");
++
+ static struct otg_notify sec_otg_notify = {
+ 	.vbus_drive	= otg_accessory_power,
+ #if defined(CONFIG_USB_AUDIO_POWER_SAVING)
+@@ -678,6 +683,9 @@
+ 		sec_otg_notify.disable_control = 1;
+ 	if (pdata->unsupport_host_en == 1)
+ 		sec_otg_notify.unsupport_host = 1;	
++	if (booting_delay_override_sec &&
++	    booting_delay_override_sec < (unsigned int)sec_otg_notify.booting_delay_sec)
++		sec_otg_notify.booting_delay_sec = booting_delay_override_sec;
+ 	set_otg_notify(&sec_otg_notify);
+ 	set_notify_data(&sec_otg_notify, pdata);
+ 	sec_otg_notify.booting_delay_sync_usb = is_dwc3_msm_probe_done() ? 0 : 1;

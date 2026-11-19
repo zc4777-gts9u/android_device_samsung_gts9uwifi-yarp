@@ -1,0 +1,1 @@
+options usb_notifier_qcom booting_delay_override_sec=3
