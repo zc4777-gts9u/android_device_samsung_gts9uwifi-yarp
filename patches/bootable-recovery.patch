@@ -18,8 +18,98 @@ index 71c39ef..e2448cc 100644
 -    # Reboot to bootloader if Keystore crashes more than 4 times before `sys.boot_completed`.
 -    critical window=0
      seclabel u:r:recovery:s0
+diff --git a/partition.cpp b/partition.cpp
+index 4c6e94b..45ea7a1 100755
+--- a/partition.cpp
++++ b/partition.cpp
+@@ -48,6 +48,8 @@
+ #include <android-base/scopeguard.h>
+ #include <android-base/strings.h>
+ #include <android-base/unique_fd.h>
++#include <private/android_filesystem_config.h>
++#include <selinux/android.h>
+ #include <selinux/selinux.h>
+ #include <selinux/label.h>
+ #include <sparse_format.h>
+@@ -1955,17 +1957,17 @@ bool TWPartition::WipeEncryption() {
+     has_data_media_ = save_data_media;
+     DataManager::SetValue(TW_IS_ENCRYPTED, 0);
+     gui2_console::info("format_data_msg");
+-    if (is_fbe_) {
+-      gui2_console::warning("data_media_fbe_msg");
+-    } else {
+-      if (has_data_media_ && !symlink_mount_point_.empty()) {
+-        if (Mount(false)) TWPartitionManager::AddMtpStorage(mtp_storage_id_);
+-      }
++    if (!is_fbe_ && has_data_media_ && !symlink_mount_point_.empty() && Mount(false)) {
++      TWPartitionManager::AddMtpStorage(mtp_storage_id_);
+     }
+ 
+     ret = true;
+     if (!key_directory_.empty()) ret = PartitionManager.WipeByPath(key_directory_);
+     if (ret) ret = base_partition->PostWipeEncryption();
++    if (ret && is_fbe_ && has_data_media_) {
++      RecreateMediaFolder();
++      if (!TWFunc::IsPathExists(storage_path_)) gui2_console::warning("data_media_fbe_msg");
++    }
+     return ret;
+   }
+   has_data_media_ = save_data_media;
+@@ -2881,7 +2883,51 @@ void TWPartition::RecreateMediaFolder() {
+   const std::string media_path = mount_point_ + "/media";
+ 
+   if (is_fbe_) {
+-    LOGINFO("Not recreating media folder on FBE\n");
++    if (mount_point_ != "/data" || !decrypted_block_device_.empty() || !Mount(false) ||
++        current_file_system_ != "f2fs" || TWFunc::IsPathExists(media_path)) {
++      return;
++    }
++
++    // Only prepare the media root on raw userdata with no existing Android data.
++    struct stat mounted {};
++    struct stat block {};
++    if (stat(mount_point_.c_str(), &mounted) != 0 ||
++        stat(primary_block_device_.c_str(), &block) != 0 ||
++        !S_ISBLK(block.st_mode) || mounted.st_dev != block.st_rdev) {
++      return;
++    }
++    std::error_code error;
++    for (std::filesystem::directory_iterator it(mount_point_, error), end;
++         !error && it != end; it.increment(error)) {
++      const auto name = it->path().filename();
++      if (name != "lost+found" && name != "recovery") return;
++    }
++    if (error) return;
++
++    // Android creates media/0 and applies the user's encryption policy.
++    if (mkdir(media_path.c_str(), 0550) != 0) {
++      LOGERR("Unable to create %s: %s\n", media_path.c_str(), strerror(errno));
++      return;
++    }
++    if (chown(media_path.c_str(), AID_MEDIA_RW, AID_MEDIA_RW) != 0) {
++      LOGERR("Unable to set media directory ownership: %s\n", strerror(errno));
++      rmdir(media_path.c_str());
++      return;
++    }
++    if (selinux_android_restorecon(media_path.c_str(), 0) != 0) {
++      LOGINFO("Unable to restore SELinux context for %s\n", media_path.c_str());
++    }
++
++    const std::string previous_storage_path = storage_path_;
++    storage_path_ = media_path;
++    symlink_path_ = media_path;
++    if (!symlink_mount_point_.empty() && !IsPathMounted(symlink_mount_point_)) BindMount();
++    DataManager::SetValue(TW_INTERNAL_PATH, media_path);
++    if (previous_storage_path != media_path &&
++        DataManager::GetCurrentStoragePath() == previous_storage_path) {
++      DataManager::SetValue("tw_storage_path", media_path);
++    }
++    LOGINFO("Prepared the media directory on freshly formatted userdata.\n");
+     return;
+   }
+   if (!Mount(true)) {
 diff --git a/partitionmanager.cpp b/partitionmanager.cpp
-index c419f3d..6237ed2 100755
+index c419f3d..3bd6ac5 100755
 --- a/partitionmanager.cpp
 +++ b/partitionmanager.cpp
 @@ -34,6 +34,7 @@
@@ -123,3 +213,11 @@ index c419f3d..6237ed2 100755
    }
  #ifdef TW_HAS_MTP
    if (mtp_pid_) {
+@@ -2760,6 +2786,7 @@ bool TWPartitionManager::AddRemoveMtpStorage(const TWPartition* part,
+       return true;
+     }
+     if (message_type == MTP_MESSAGE_ADD_STORAGE && part->IsMounted()) {
++      if (part->has_data_media_ && !TWFunc::IsPathExists(part->storage_path_)) return false;
+       mtp_message.message_type = MTP_MESSAGE_ADD_STORAGE; // Add
+       mtp_message.storage_id = part->mtp_storage_id_;
+       if (part->storage_path_.size() >= sizeof(mtp_message.path)) {

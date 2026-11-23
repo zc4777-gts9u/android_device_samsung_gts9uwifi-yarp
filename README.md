@@ -6,6 +6,8 @@ The Samsung reboot-reason modules were tested by loading the exact modules on th
 
 r8 reads the battery from the kernel and releases the userdata mapping before formatting. Recovery suspends MTP during Format Data and restores it afterward if it was enabled.
 
+r9 prepares the media directory for MTP after a clean F2FS format. Android initializes user storage and encryption on first boot.
+
 ## Build
 
 Use a built LineageOS 24 tree for SM-X910 with kernel `0740b96ee364` (5.15.220), the CYG1-based vendor used by the ROM, and the matching `recovery.img`, `vendor_dlkm`, and prepared kernel build output. The preparation script stages the binaries and Samsung firmware files from that local build.
@@ -19,10 +21,10 @@ repo sync -c --no-tags -j8
 
 git clone https://github.com/zc4777-gts9u/android_device_samsung_gts9uwifi-yarp.git \
   device/samsung/gts9uwifi
-git -C device/samsung/gts9uwifi checkout r8
+git -C device/samsung/gts9uwifi checkout r9
 DEVICE_TREE="$PWD/device/samsung/gts9uwifi"
 
-# Select the source revisions used for r8 before applying its patches.
+# Select the source revisions used for r9 before applying its patches.
 git -C bootable/recovery fetch --depth=1 https://github.com/TWRP-Test/android_bootable_recovery.git \
   a93a12ec107265ab9c3c7fe3e4f96c8740a01337
 git -C bootable/recovery checkout --detach a93a12ec107265ab9c3c7fe3e4f96c8740a01337
