@@ -19,7 +19,7 @@ index 71c39ef..e2448cc 100644
 -    critical window=0
      seclabel u:r:recovery:s0
 diff --git a/partitionmanager.cpp b/partitionmanager.cpp
-index c419f3d..acf144c 100755
+index c419f3d..6237ed2 100755
 --- a/partitionmanager.cpp
 +++ b/partitionmanager.cpp
 @@ -34,6 +34,7 @@
@@ -38,7 +38,21 @@ index c419f3d..acf144c 100755
  #include "MtpMessage.hpp"
  #include "TwrpMtp.hpp"
  #endif
-@@ -2646,6 +2648,13 @@ bool TWPartitionManager::EnableMtp() {
+@@ -1661,8 +1663,13 @@ int TWPartitionManager::FormatData() {
+       if (metadata) metadata->Mount(true);
+       if (!CheckPendingMerges()) return false;
+     }
++    // Stop MTP from reopening files under /data during unmount.
++    const bool restore_mtp = DataManager::GetIntValue("tw_mtp_enabled") != 0;
++    if (restore_mtp) DisableMtp();
++
+     ret = dat->WipeEncryption();
+     if (ret) TWFunc::CheckAndRunScript("/system/bin/formatdata.sh", "Format Data Script");
++    if (restore_mtp && !EnableMtp()) DisableMtp();
+     return ret;
+   }
+   gui2_console::log_error("unable_to_locate", "/data");
+@@ -2646,6 +2653,13 @@ bool TWPartitionManager::EnableMtp() {
      return true;
    }
  
@@ -52,7 +66,7 @@ index c419f3d..acf144c 100755
    int mtppipe[2];
  
    if (pipe(mtppipe) < 0) {
-@@ -2655,10 +2664,12 @@ bool TWPartitionManager::EnableMtp() {
+@@ -2655,10 +2669,12 @@ bool TWPartitionManager::EnableMtp() {
  
    if (android::base::GetProperty("sys.usb.config", "") != "mtp,adb") {
      android::base::SetProperty("sys.usb.config", "none");
@@ -69,7 +83,7 @@ index c419f3d..acf144c 100755
      android::base::SetProperty("sys.usb.config", "mtp,adb");
    }
    /* To enable MTP debug, use the twrp command line feature:
-@@ -2669,12 +2680,20 @@ bool TWPartitionManager::EnableMtp() {
+@@ -2669,12 +2685,20 @@ bool TWPartitionManager::EnableMtp() {
    if (mtp_pid_) {
      close(mtppipe[0]); // Host closes read side
      mtp_write_fd = mtppipe[1];
@@ -90,7 +104,7 @@ index c419f3d..acf144c 100755
    gui2_console::log_error("mtp_fail");
    return false;
  #else
-@@ -2700,11 +2719,13 @@ bool TWPartitionManager::DisableMtp() {
+@@ -2700,11 +2724,13 @@ bool TWPartitionManager::DisableMtp() {
    android::base::SetProperty("sys.usb.ffs.mtp.ready", "0");
    if (android::base::GetProperty("sys.usb.config", "") != "adb") {
      android::base::SetProperty("sys.usb.config", "none");

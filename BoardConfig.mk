@@ -84,6 +84,7 @@ TW_HAS_DOWNLOAD_MODE := true
 TW_THEME := landscape_hdpi
 TW_FRAMERATE := 60
 TW_BRIGHTNESS_PATH := /sys/class/backlight/panel0-backlight/brightness
+TW_CUSTOM_BATTERY_PATH := /sys/class/power_supply/battery
 TW_MAX_BRIGHTNESS := 510
 TW_DEFAULT_BRIGHTNESS := 255
 TW_INPUT_BLACKLIST := "hbtp_vm"
@@ -94,6 +95,7 @@ TW_DEVICE_VERSION := SM-X910-LOS24
 TWRP_INCLUDE_LOGCAT := true
 TW_INCLUDE_LPDUMP := true
 TW_INCLUDE_LPTOOLS := true
+TW_USE_DMCTL := true
 
 # Match patch levels used by the installed device; keep the Android 16 build API.
 PLATFORM_SECURITY_PATCH := 2026-11-01
