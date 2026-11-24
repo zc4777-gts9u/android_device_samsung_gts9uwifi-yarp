@@ -221,3 +221,222 @@ index c419f3d..3bd6ac5 100755
        mtp_message.message_type = MTP_MESSAGE_ADD_STORAGE; // Add
        mtp_message.storage_id = part->mtp_storage_id_;
        if (part->storage_path_.size() >= sizeof(mtp_message.path)) {
+diff --git a/data.cpp b/data.cpp
+index c22ec4e..bad3d21 100644
+--- a/data.cpp
++++ b/data.cpp
+@@ -17,9 +17,12 @@
+ */
+ 
+ #include <pthread.h>
++#include <sys/stat.h>
+ #include <unistd.h>
+ 
++#include <cerrno>
+ #include <charconv>
++#include <cstring>
+ #include <chrono>
+ #include <ctime>
+ #include <filesystem>
+@@ -43,7 +46,6 @@
+ #include "infomanager.hpp"
+ #include "variables.h"
+ #include "partitions.hpp"
+-#include "set_metadata.h"
+ #include "twcommon.h"
+ #include "twrpminui/minui.h"
+ #include "twrp_functions.hpp"
+@@ -95,6 +97,18 @@ int DataManager::ResetDefaults() {
+   return 0;
+ }
+ 
++static bool PrepareSettingsDirectory() {
++  if (!PartitionManager.MountByPath(TW_SETTINGS_DIR, false)) {
++    LOGERR("Unable to mount storage for '%s'\n", TW_SETTINGS_DIR);
++    return false;
++  }
++  if (mkdir(TW_SETTINGS_DIR, 0770) != 0 && errno != EEXIST) {
++    LOGERR("Unable to create '%s': %s\n", TW_SETTINGS_DIR, strerror(errno));
++    return false;
++  }
++  return true;
++}
++
+ int DataManager::LoadValues(const std::string& filename) {
+   std::string dev_id;
+ 
+@@ -103,13 +117,12 @@ int DataManager::LoadValues(const std::string& filename) {
+   GetValue("device_id", dev_id);
+   // Save off the backing file for set operations
+   kBackingFile = filename;
++  // Mount before taking values_lock_ because partition operations also read settings.
++  const bool can_load = filename != TW_SETTINGS_FILE || PrepareSettingsDirectory();
++  pthread_mutex_lock(&values_lock_);
+   persist_.SetFile(filename);
+   persist_.SetFileVersion(FILE_VERSION);
+-
+-  // Read in the file, if possible
+-  pthread_mutex_lock(&values_lock_);
+-  persist_.LoadValues();
+-
++  if (can_load) persist_.LoadValues();
+   pthread_mutex_unlock(&values_lock_);
+   const std::string current = GetCurrentStoragePath();
+   TWPartition* part = PartitionManager.FindPartitionByPath(current);
+@@ -129,20 +142,18 @@ int DataManager::Flush() {
+ 
+ int DataManager::SaveValues() {
+   if (kBackingFile.empty()) return -1;
++  if (kBackingFile == TW_SETTINGS_FILE && !PrepareSettingsDirectory()) return -1;
+ 
+-  //string mount_path = GetSettingsStoragePath();
+-  //PartitionManager.MountByPath(mount_path.c_str(), 1);
+-
+-  //mPersist.SetFile(mBackingFile);
+-  persist_.SetFile(fs::path(TW_PERSIST_DIR) / TW_SETTINGS_FILE);
+-  persist_.SetFileVersion(FILE_VERSION);
+   pthread_mutex_lock(&values_lock_);
+-  persist_.SaveValues();
++  persist_.SetFile(kBackingFile);
++  persist_.SetFileVersion(FILE_VERSION);
++  const int result = persist_.SaveValues();
+   pthread_mutex_unlock(&values_lock_);
+ 
+-  tw_set_default_metadata(kBackingFile.c_str());
+-  LOGINFO("Saved settings file values to '%s'\n", kBackingFile.c_str());
+-  return 0;
++  if (result == 0) {
++    LOGINFO("Saved settings file values to '%s'\n", kBackingFile.c_str());
++  }
++  return result;
+ }
+ 
+ int DataManager::GetValue(const std::string& key, std::string& value) {
+@@ -936,7 +947,6 @@ void DataManager::OutputVersion() {
+ 
+ void DataManager::ReadSettingsFile() {
+   // Load up the values for TWRP - Sleep to let the card be ready
+-  const auto settings_file = fs::path(TW_PERSIST_DIR) / TW_SETTINGS_FILE;
+   int is_enc, has_data_media;
+ 
+   GetValue(TW_IS_ENCRYPTED, is_enc);
+@@ -954,7 +964,7 @@ void DataManager::ReadSettingsFile() {
+   */
+ 
+   LOGINFO("Attempt to load settings from settings file...\n");
+-  LoadValues(settings_file);
++  LoadValues(TW_SETTINGS_FILE);
+   OutputVersion();
+   PartitionManager.MountAllStorage();
+   UpdateTimezoneEnvironment();
+@@ -979,5 +989,5 @@ void DataManager::Vibrate(const std::string& key) {
+ 
+ void DataManager::LoadTWRPFolderInfo() {
+   SetValue(TW_RECOVERY_FOLDER_VAR, TWFunc::CheckForTwrpFolder());
+-  kBackingFile = fs::path(TW_PERSIST_DIR) / TW_SETTINGS_FILE;
++  kBackingFile = TW_SETTINGS_FILE;
+ }
+diff --git a/infomanager.cpp b/infomanager.cpp
+index b99277e..f42ef22 100644
+--- a/infomanager.cpp
++++ b/infomanager.cpp
+@@ -16,25 +16,20 @@
+ 	along with TWRP.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
+-#include <sys/stat.h>
+-
++#include <cerrno>
+ #include <charconv>
+ #include <cstdio>
+ #include <cstring>
+ #include <format>
+ #include <map>
+-#include <memory>
+ #include <string>
+ 
+ #include <android-base/file.h>
+ #include <android-base/parsedouble.h>
+-#include <android-base/scopeguard.h>
+ 
+ #include "infomanager.hpp"
+-#include "partitions.hpp"
+ #include "set_metadata.h"
+ #include "twcommon.h"
+-#include "twrp_functions.hpp"
+ #include "variables.h"
+ 
+ InfoManager::InfoManager() {
+@@ -68,22 +63,7 @@ void InfoManager::Clear() {
+   values_.clear();
+ }
+ 
+-static bool twPersistFirstMounted = false;
+-
+-static void twPersistMount() {
+-  twPersistFirstMounted = PartitionManager.IsMountedByPath(TW_PERSIST_DIR);
+-  if (!twPersistFirstMounted) PartitionManager.MountByPath(TW_PERSIST_DIR, false);
+-}
+-
+-static void twPersistUnMount() {
+-  // if (!twPersistFirstMounted) PartitionManager.UnmountByPath(TW_PERSIST_DIR, false);
+-}
+-
+ int InfoManager::LoadValues() {
+-  twPersistMount();
+-  auto unmount = android::base::make_scope_guard([&] { twPersistUnMount(); });
+-  if (!TWFunc::IsPathExists(std::string(TW_PERSIST_DIR))) mkdir(TW_PERSIST_DIR, 0777);
+-
+   std::string content;
+   if (!android::base::ReadFileToString(file_, &content)) {
+     LOGINFO("InfoManager file '%s' not found.\n", file_.c_str());
+@@ -130,8 +110,7 @@ int InfoManager::LoadValues() {
+ int InfoManager::SaveValues() {
+   if (file_.empty()) return -1;
+ 
+-  twPersistMount();
+-  auto unmount = android::base::make_scope_guard([&] { twPersistUnMount(); });
++  const bool is_settings = file_ == TW_SETTINGS_FILE;
+   LOGINFO("InfoManager saving '%s'\n", file_.c_str());
+ 
+   // Serialize the whole file into one buffer, then write it in a single pass. The
+@@ -151,11 +130,19 @@ int InfoManager::SaveValues() {
+     put(value);
+   }
+ 
+-  std::unique_ptr<FILE, decltype(&fclose)> file(fopen(file_.c_str(), "wb"), fclose);
+-  if (!file) return -1;
+-  fwrite(out.data(), 1, out.size(), file.get());
+-  file.reset();  // flush + close before setting metadata, preserving original call order
+-  tw_set_default_metadata(file_.c_str());
++  FILE* file = fopen(file_.c_str(), "wb");
++  if (!file) {
++    LOGERR("Unable to open '%s' for writing: %s\n", file_.c_str(), strerror(errno));
++    return -1;
++  }
++  const size_t written = fwrite(out.data(), 1, out.size(), file);
++  const int close_result = fclose(file);
++  if (written != out.size() || close_result != 0) {
++    LOGERR("Unable to save '%s'\n", file_.c_str());
++    return -1;
++  }
++  // Recovery settings inherit the cache label; backup metadata inherits the media label.
++  if (!is_settings) tw_set_default_metadata(file_.c_str());
+   return 0;
+ }
+ 
+diff --git a/variables.h b/variables.h
+index e95e017..99cfc6b 100755
+--- a/variables.h
++++ b/variables.h
+@@ -22,8 +22,8 @@
+ 
+ #define TW_PERSIST_ROOT             "/mnt/vendor/persist"
+ 
+-#define TW_PERSIST_DIR              TW_PERSIST_ROOT "/TWRP"
+-#define TW_SETTINGS_FILE            ".twrp_settings"
++#define TW_SETTINGS_DIR             "/cache/recovery"
++#define TW_SETTINGS_FILE            TW_SETTINGS_DIR "/.twrp_settings"
+ #define TW_RECOVERY_NAME            "TWRP"
+ #define TW_DEFAULT_RECOVERY_FOLDER  "/" TW_RECOVERY_NAME
+ #define TW_STORAGE_PATH             "/data/recovery/"
