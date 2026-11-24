@@ -222,7 +222,7 @@ index c419f3d..3bd6ac5 100755
        mtp_message.storage_id = part->mtp_storage_id_;
        if (part->storage_path_.size() >= sizeof(mtp_message.path)) {
 diff --git a/data.cpp b/data.cpp
-index c22ec4e..bad3d21 100644
+index c22ec4e..c66b6c8 100644
 --- a/data.cpp
 +++ b/data.cpp
 @@ -17,9 +17,12 @@
@@ -265,25 +265,32 @@ index c22ec4e..bad3d21 100644
  int DataManager::LoadValues(const std::string& filename) {
    std::string dev_id;
  
-@@ -103,13 +117,12 @@ int DataManager::LoadValues(const std::string& filename) {
+@@ -103,14 +117,18 @@ int DataManager::LoadValues(const std::string& filename) {
    GetValue("device_id", dev_id);
    // Save off the backing file for set operations
    kBackingFile = filename;
-+  // Mount before taking values_lock_ because partition operations also read settings.
-+  const bool can_load = filename != TW_SETTINGS_FILE || PrepareSettingsDirectory();
-+  pthread_mutex_lock(&values_lock_);
-   persist_.SetFile(filename);
-   persist_.SetFileVersion(FILE_VERSION);
+-  persist_.SetFile(filename);
+-  persist_.SetFileVersion(FILE_VERSION);
 -
 -  // Read in the file, if possible
--  pthread_mutex_lock(&values_lock_);
++  // Mount before taking values_lock_ because partition operations also read settings.
++  const bool is_settings = filename == TW_SETTINGS_FILE;
++  const bool can_load = !is_settings || PrepareSettingsDirectory();
++  static constexpr char kOldSettingsFile[] = "/cache/recovery/.twrp_settings";
++  const bool migrate = is_settings && can_load && access(filename.c_str(), F_OK) != 0
++      && errno == ENOENT && access(kOldSettingsFile, F_OK) == 0;
+   pthread_mutex_lock(&values_lock_);
 -  persist_.LoadValues();
 -
-+  if (can_load) persist_.LoadValues();
++  persist_.SetFile(migrate ? kOldSettingsFile : filename);
++  persist_.SetFileVersion(FILE_VERSION);
++  const bool migrated = can_load && persist_.LoadValues() == 0 && migrate;
    pthread_mutex_unlock(&values_lock_);
++  if (migrated) SaveValues();
    const std::string current = GetCurrentStoragePath();
    TWPartition* part = PartitionManager.FindPartitionByPath(current);
-@@ -129,20 +142,18 @@ int DataManager::Flush() {
+   if (!part) part = PartitionManager.GetDefaultStoragePartition();
+@@ -129,20 +147,18 @@ int DataManager::Flush() {
  
  int DataManager::SaveValues() {
    if (kBackingFile.empty()) return -1;
@@ -312,7 +319,7 @@ index c22ec4e..bad3d21 100644
  }
  
  int DataManager::GetValue(const std::string& key, std::string& value) {
-@@ -936,7 +947,6 @@ void DataManager::OutputVersion() {
+@@ -936,7 +952,6 @@ void DataManager::OutputVersion() {
  
  void DataManager::ReadSettingsFile() {
    // Load up the values for TWRP - Sleep to let the card be ready
@@ -320,7 +327,7 @@ index c22ec4e..bad3d21 100644
    int is_enc, has_data_media;
  
    GetValue(TW_IS_ENCRYPTED, is_enc);
-@@ -954,7 +964,7 @@ void DataManager::ReadSettingsFile() {
+@@ -954,7 +969,7 @@ void DataManager::ReadSettingsFile() {
    */
  
    LOGINFO("Attempt to load settings from settings file...\n");
@@ -329,7 +336,7 @@ index c22ec4e..bad3d21 100644
    OutputVersion();
    PartitionManager.MountAllStorage();
    UpdateTimezoneEnvironment();
-@@ -979,5 +989,5 @@ void DataManager::Vibrate(const std::string& key) {
+@@ -979,5 +994,5 @@ void DataManager::Vibrate(const std::string& key) {
  
  void DataManager::LoadTWRPFolderInfo() {
    SetValue(TW_RECOVERY_FOLDER_VAR, TWFunc::CheckForTwrpFolder());
@@ -426,16 +433,17 @@ index b99277e..f42ef22 100644
  }
  
 diff --git a/variables.h b/variables.h
-index e95e017..99cfc6b 100755
+index e95e017..746175d 100755
 --- a/variables.h
 +++ b/variables.h
-@@ -22,8 +22,8 @@
+@@ -22,8 +22,9 @@
  
  #define TW_PERSIST_ROOT             "/mnt/vendor/persist"
  
 -#define TW_PERSIST_DIR              TW_PERSIST_ROOT "/TWRP"
 -#define TW_SETTINGS_FILE            ".twrp_settings"
-+#define TW_SETTINGS_DIR             "/cache/recovery"
++// Android's RecoverySystem cleans /cache/recovery on normal boot.
++#define TW_SETTINGS_DIR             "/cache/yarp"
 +#define TW_SETTINGS_FILE            TW_SETTINGS_DIR "/.twrp_settings"
  #define TW_RECOVERY_NAME            "TWRP"
  #define TW_DEFAULT_RECOVERY_FOLDER  "/" TW_RECOVERY_NAME

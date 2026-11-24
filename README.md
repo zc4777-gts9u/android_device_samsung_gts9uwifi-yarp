@@ -8,7 +8,7 @@ r8 reads the battery from the kernel and releases the userdata mapping before fo
 
 r9 prepares the media directory for MTP after a clean F2FS format. Android initializes user storage and encryption on first boot.
 
-r10 stores recovery settings, including the time zone, in `/cache/recovery/.twrp_settings`. Time zone persistence was verified across a recovery reboot on SM-X910.
+r10 stored settings in Android's recovery log directory. Android cleans that directory during normal boot. r11 stores settings in `/cache/yarp/.twrp_settings` and reads the r10 file once if it is still available.
 
 ## Build
 
@@ -23,10 +23,10 @@ repo sync -c --no-tags -j8
 
 git clone https://github.com/zc4777-gts9u/android_device_samsung_gts9uwifi-yarp.git \
   device/samsung/gts9uwifi
-git -C device/samsung/gts9uwifi checkout r10
+git -C device/samsung/gts9uwifi checkout r11
 DEVICE_TREE="$PWD/device/samsung/gts9uwifi"
 
-# Select the source revisions used for r10 before applying its patches.
+# Select the source revisions used for r11 before applying its patches.
 git -C bootable/recovery fetch --depth=1 https://github.com/TWRP-Test/android_bootable_recovery.git \
   a93a12ec107265ab9c3c7fe3e4f96c8740a01337
 git -C bootable/recovery checkout --detach a93a12ec107265ab9c3c7fe3e4f96c8740a01337
